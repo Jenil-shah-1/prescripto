@@ -138,21 +138,307 @@ const allDoctors = async (req, res) => {
   }
 };
 
+// API to get eligible patients for room assignment (Accepted & not Completed)
+const getEligiblePatientsAdmin = async (req, res) => {
+  try {
+    const appointments = await appointmentModel.find({
+      cancelled: false,
+      isCompleted: false,
+      $or: [
+        { isAccepted: true },
+        { status: "accepted" },
+        { status: "Accepted" },
+        { status: "approved" },
+        { status: "Approved" }
+      ]
+    }).sort({ date: -1 });
+
+    res.json({ success: true, appointments });
+  } catch (error) {
+    console.log(error);
+    res.json({ success: false, message: error.message });
+  }
+};
+
 // API to get dashboard data for admin panel
 const adminDashboard = async (req, res) => {
   try {
     const doctors = await doctorModel.find({});
     const users = await userModel.find({});
     const appointments = await appointmentModel.find({});
+    const rooms = await roomModel.find({});
+    const bills = await billModel.find({});
+
+    const todayObj = new Date();
+    const todayStr = `${todayObj.getDate()}_${todayObj.getMonth() + 1}_${todayObj.getFullYear()}`;
+    const todayStart = new Date(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate()).getTime();
+    const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+
+    // Today's appointments
+    const todayAppointments = appointments.filter(
+      (app) => app.slotDate === todayStr || (app.date >= todayStart && app.date < todayEnd)
+    );
+
+    // Pending Room Requests
+    const pendingRoomRequests = appointments.filter(
+      (app) => app.roomRequested && (app.roomStatus === "Pending" || app.roomStatus === "Approved")
+    );
+
+    // Occupied Rooms
+    const occupiedRoomsCount = rooms.filter((r) => r.occupiedBeds > 0).length;
+
+    // Today's revenue calculation from bills payment history & appointment payments
+    let todayRevenue = 0;
+    bills.forEach((bill) => {
+      if (bill.paymentHistory && bill.paymentHistory.length > 0) {
+        bill.paymentHistory.forEach((ph) => {
+          if (ph.paymentDate >= todayStart && ph.paymentDate < todayEnd) {
+            todayRevenue += ph.amountPaid || 0;
+          }
+        });
+      }
+    });
+
+    // Room Occupancy Summary widget breakdown
+    const categories = ["General Ward", "ICU", "Semi Private / Twin Sharing", "Private Room"];
+    const roomOccupancy = categories.map((catName) => {
+      const catRooms = rooms.filter(
+        (r) => r.category === catName || (catName.includes("Twin") && r.category.includes("Twin"))
+      );
+      const totalCapacity = catRooms.reduce((acc, r) => acc + (r.capacity || 0), 0);
+      const occupiedBeds = catRooms.reduce((acc, r) => acc + (r.occupiedBeds || 0), 0);
+      return {
+        category: catName,
+        occupied: occupiedBeds,
+        total: totalCapacity,
+        percentage: totalCapacity > 0 ? Math.round((occupiedBeds / totalCapacity) * 100) : 0,
+      };
+    });
+
+    // Pending Tasks
+    const pendingBillsCount = bills.filter((b) => b.paymentStatus === "Pending" || b.paymentStatus === "Partially Paid").length;
+    const doctorsOnDuty = doctors.filter((d) => d.available !== false).length;
+
+    const pendingTasks = {
+      pendingRoomRequests: pendingRoomRequests.length,
+      pendingBills: pendingBillsCount,
+      todayAppointments: todayAppointments.length,
+      doctorsOnDuty: doctorsOnDuty,
+    };
+
+    // Build Recent Activity Feed (top 10 dynamic activities)
+    const activities = [];
+
+    appointments.forEach((app) => {
+      if (app.isAccepted && app.acceptedAt) {
+        activities.push({
+          id: `acc-${app._id}`,
+          title: "Appointment Accepted",
+          description: `Dr. ${app.docData?.name || "Doctor"} accepted appointment for ${app.userData?.name || "Patient"}`,
+          timestamp: app.acceptedAt,
+          type: "accepted",
+        });
+      }
+      if (app.isCompleted && app.completedAt) {
+        activities.push({
+          id: `comp-${app._id}`,
+          title: "Appointment Completed",
+          description: `Dr. ${app.docData?.name || "Doctor"} completed appointment for ${app.userData?.name || "Patient"}`,
+          timestamp: app.completedAt,
+          type: "completed",
+        });
+      }
+      if (app.roomStatus === "Allocated" && app.roomAdmissionDate) {
+        activities.push({
+          id: `room-${app._id}`,
+          title: "Room Allocated",
+          description: `Room ${app.roomNumber || ""} (${app.roomCategory || "Room"}) allocated to ${app.userData?.name || "Patient"}`,
+          timestamp: app.roomAdmissionDate,
+          type: "room_allocated",
+        });
+      }
+      if (app.roomStatus === "Discharged" && app.roomDischargedAt) {
+        activities.push({
+          id: `dis-${app._id}`,
+          title: "Patient Discharged",
+          description: `Patient ${app.userData?.name || "Patient"} discharged from Room ${app.roomNumber || ""}`,
+          timestamp: app.roomDischargedAt,
+          type: "discharged",
+        });
+      }
+    });
+
+    bills.forEach((bill) => {
+      activities.push({
+        id: `bill-${bill._id}`,
+        title: "Invoice Generated",
+        description: `Invoice #${bill.billNumber} generated for ${bill.patientName} (₹${bill.totalAmount})`,
+        timestamp: bill.billDate || (bill.createdAt ? new Date(bill.createdAt).getTime() : Date.now()),
+        type: "invoice",
+      });
+
+      if (bill.paymentHistory && bill.paymentHistory.length > 0) {
+        bill.paymentHistory.forEach((ph, idx) => {
+          activities.push({
+            id: `pay-${bill._id}-${idx}`,
+            title: "Payment Received",
+            description: `Payment of ₹${ph.amountPaid} received from ${bill.patientName} via ${ph.paymentMethod || "Cash"}`,
+            timestamp: ph.paymentDate,
+            type: "payment",
+          });
+        });
+      }
+    });
+
+    // Sort activities descending by timestamp
+    activities.sort((a, b) => b.timestamp - a.timestamp);
+    const recentActivity = activities.slice(0, 10);
 
     const dashData = {
       doctors: doctors.length,
       appointments: appointments.length,
       patients: users.length,
-      latestAppointments: appointments.reverse(),
+      todayAppointmentsCount: todayAppointments.length,
+      pendingRoomRequestsCount: pendingRoomRequests.length,
+      occupiedRoomsCount: occupiedRoomsCount,
+      todayRevenue: todayRevenue,
+      recentActivity: recentActivity,
+      roomOccupancy: roomOccupancy,
+      pendingTasks: pendingTasks,
+      latestAppointments: [...appointments].reverse().slice(0, 5),
     };
 
     res.json({ success: true, dashData });
+  } catch (error) {
+    console.log(error);
+    res.json({ success: false, message: error.message });
+  }
+};
+
+// API to get analytics data for admin panel
+const getAnalyticsAdmin = async (req, res) => {
+  try {
+    const appointments = await appointmentModel.find({});
+    const bills = await billModel.find({});
+    const rooms = await roomModel.find({});
+    const doctors = await doctorModel.find({});
+
+    // 1. Appointments Per Day (last 7 days)
+    const daysMap = {};
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dayLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      daysMap[dayLabel] = 0;
+    }
+
+    appointments.forEach((app) => {
+      const appDate = new Date(app.date);
+      const dayLabel = appDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      if (daysMap[dayLabel] !== undefined) {
+        daysMap[dayLabel] += 1;
+      }
+    });
+
+    const appointmentsPerDay = Object.keys(daysMap).map((key) => ({
+      date: key,
+      appointments: daysMap[key],
+    }));
+
+    // 2. Revenue Per Month (last 6 months)
+    const monthMap = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthLabel = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+      monthMap[monthLabel] = 0;
+    }
+
+    bills.forEach((bill) => {
+      if (bill.paymentHistory && bill.paymentHistory.length > 0) {
+        bill.paymentHistory.forEach((ph) => {
+          const pDate = new Date(ph.paymentDate);
+          const monthLabel = pDate.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+          if (monthMap[monthLabel] !== undefined) {
+            monthMap[monthLabel] += ph.amountPaid || 0;
+          }
+        });
+      }
+    });
+
+    const revenuePerMonth = Object.keys(monthMap).map((key) => ({
+      month: key,
+      revenue: monthMap[key],
+    }));
+
+    // 3. Room Occupancy
+    const categories = ["General Ward", "ICU", "Semi Private / Twin Sharing", "Private Room"];
+    const roomOccupancy = categories.map((catName) => {
+      const catRooms = rooms.filter(
+        (r) => r.category === catName || (catName.includes("Twin") && r.category.includes("Twin"))
+      );
+      const totalCapacity = catRooms.reduce((acc, r) => acc + (r.capacity || 0), 0);
+      const occupiedBeds = catRooms.reduce((acc, r) => acc + (r.occupiedBeds || 0), 0);
+      return {
+        category: catName,
+        occupied: occupiedBeds,
+        total: totalCapacity,
+        available: Math.max(0, totalCapacity - occupiedBeds),
+      };
+    });
+
+    // 4. Doctor Workload
+    const docWorkloadMap = {};
+    doctors.forEach((doc) => {
+      docWorkloadMap[doc.name] = { total: 0, completed: 0 };
+    });
+
+    appointments.forEach((app) => {
+      const docName = app.docData?.name;
+      if (docName && docWorkloadMap[docName]) {
+        docWorkloadMap[docName].total += 1;
+        if (app.isCompleted) docWorkloadMap[docName].completed += 1;
+      }
+    });
+
+    const doctorWorkload = Object.keys(docWorkloadMap).map((name) => ({
+      name: `Dr. ${name}`,
+      total: docWorkloadMap[name].total,
+      completed: docWorkloadMap[name].completed,
+    }));
+
+    // 5. Appointment Status Distribution
+    const statusDist = {
+      Completed: 0,
+      Accepted: 0,
+      Pending: 0,
+      Cancelled: 0,
+      Rejected: 0,
+    };
+
+    appointments.forEach((app) => {
+      if (app.isCompleted) statusDist.Completed += 1;
+      else if (app.cancelled) statusDist.Cancelled += 1;
+      else if (app.isRejected) statusDist.Rejected += 1;
+      else if (app.isAccepted) statusDist.Accepted += 1;
+      else statusDist.Pending += 1;
+    });
+
+    const appointmentStatusDistribution = Object.keys(statusDist).map((status) => ({
+      status,
+      count: statusDist[status],
+    }));
+
+    res.json({
+      success: true,
+      analytics: {
+        appointmentsPerDay,
+        revenuePerMonth,
+        roomOccupancy,
+        doctorWorkload,
+        appointmentStatusDistribution,
+      },
+    });
   } catch (error) {
     console.log(error);
     res.json({ success: false, message: error.message });
@@ -493,5 +779,7 @@ export {
   getBillsAdmin,
   markBillPaidAdmin,
   generateBillAdmin,
-  updateChargesAdmin
+  updateChargesAdmin,
+  getEligiblePatientsAdmin,
+  getAnalyticsAdmin
 };

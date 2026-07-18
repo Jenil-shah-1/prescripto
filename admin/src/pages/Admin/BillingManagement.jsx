@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useState } from 'react'
 import { AdminContext } from '../../context/AdminContext'
 
-// Inline Custom SVG Icon Components
+// Inline SVG Icon Components
 const PrinterIcon = ({ size = 16 }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
 )
@@ -38,9 +38,11 @@ const BillingManagement = () => {
     getAllAppointments
   } = useContext(AdminContext)
 
-  // Search & Filter states
+  // Section / Tab state: 'pending' | 'paid' | 'invoices' | 'history'
+  const [activeSection, setActiveSection] = useState('pending')
+
+  // Search state
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
 
   // Modals state
   const [showPaidModal, setShowPaidModal] = useState(false)
@@ -293,154 +295,415 @@ const BillingManagement = () => {
     }
   }
 
-  // Filter bills
-  const filteredBills = bills.filter(b => {
-    const matchesSearch = b.patientName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          b.doctorName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          b.billNumber.toLowerCase().includes(searchQuery.toLowerCase())
-    
-    if (statusFilter === 'pending') return matchesSearch && b.paymentStatus !== 'Paid'
-    if (statusFilter === 'paid') return matchesSearch && b.paymentStatus === 'Paid'
-    return matchesSearch
+  // Calculate Summary Cards metrics
+  let totalBilled = 0
+  let totalPaid = 0
+  let pendingDues = 0
+  let pendingCount = 0
+  let paidCount = 0
+
+  bills.forEach(b => {
+    totalBilled += b.totalAmount || 0
+    totalPaid += b.paidAmount || 0
+    if (b.paymentStatus === 'Paid') {
+      paidCount++
+    } else {
+      pendingCount++
+      pendingDues += Math.max(0, b.totalAmount - b.paidAmount)
+    }
   })
 
-  // Pending generated bills candidates (completed appointments without invoice records)
+  // Filter bills based on search query
+  const searchFilter = (b) => {
+    if (!searchQuery) return true
+    const q = searchQuery.toLowerCase()
+    return b.patientName?.toLowerCase().includes(q) || 
+           b.doctorName?.toLowerCase().includes(q) || 
+           b.billNumber?.toLowerCase().includes(q)
+  }
+
+  const pendingBills = bills.filter(b => b.paymentStatus !== 'Paid' && searchFilter(b))
+  const paidBills = bills.filter(b => b.paymentStatus === 'Paid' && searchFilter(b))
+  const allInvoices = bills.filter(searchFilter)
+
+  // Consolidated payment history ledger
+  const paymentLogs = []
+  bills.forEach(bill => {
+    if (bill.paymentHistory && Array.isArray(bill.paymentHistory)) {
+      bill.paymentHistory.forEach(h => {
+        paymentLogs.push({
+          billNumber: bill.billNumber,
+          patientName: bill.patientName,
+          doctorName: bill.doctorName,
+          amountPaid: h.amountPaid,
+          paymentMethod: h.paymentMethod,
+          paymentDate: h.paymentDate,
+          transactionId: h.transactionId || 'CASH-RECEIPT'
+        })
+      })
+    }
+  })
+  paymentLogs.sort((a, b) => b.paymentDate - a.paymentDate)
+
   const billingCandidates = appointments.filter(appt => 
     appt.isCompleted && !bills.some(b => b.appointmentId === appt._id.toString())
   )
 
   return (
-    <div className="p-6 md:p-10 w-full flex flex-col gap-6">
+    <div className="p-6 md:p-10 w-full flex flex-col gap-6 text-[#4A4A4A] max-w-7xl">
+      
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Billing & Invoices Management</h2>
-          <p className="text-gray-500 text-xs mt-0.5">Generate final patient invoices, track transaction payments, and customize individual charges.</p>
+          <h2 className="text-xl font-bold text-gray-800">Hospital Billing Management</h2>
+          <p className="text-gray-500 text-xs mt-0.5">Manage invoices, collect outstanding payments, print receipts, and review payment logs.</p>
         </div>
         <button
           onClick={() => setShowGenerateModal(true)}
           className="bg-primary text-white px-4 py-2.5 rounded-xl font-bold text-xs hover:bg-primary-dark transition shadow"
         >
-          + Generate Bill Manually
+          + Generate Invoice Manually
         </button>
       </div>
 
-      {/* SEARCH / FILTERS */}
-      <div className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-2xl border shadow-xs">
-        <div className="flex items-center gap-2 border rounded-xl px-3 py-2 flex-1 w-full bg-gray-55/10">
+      {/* 4 Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400 font-bold uppercase">Total Billed</p>
+            <p className="text-2xl font-bold text-gray-800 mt-1">₹{totalBilled}</p>
+          </div>
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <DollarSignIcon size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400 font-bold uppercase">Collected Revenue</p>
+            <p className="text-2xl font-bold text-emerald-600 mt-1">₹{totalPaid}</p>
+          </div>
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <CreditCardIcon size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400 font-bold uppercase">Pending Dues</p>
+            <p className="text-2xl font-bold text-red-600 mt-1">₹{pendingDues}</p>
+          </div>
+          <div className="p-3 bg-red-50 text-red-500 rounded-xl">
+            <DollarSignIcon size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400 font-bold uppercase">Total Invoices</p>
+            <p className="text-2xl font-bold text-purple-600 mt-1">{bills.length}</p>
+          </div>
+          <div className="p-3 bg-purple-50 text-purple-600 rounded-xl">
+            <PrinterIcon size={24} />
+          </div>
+        </div>
+      </div>
+
+      {/* SEARCH AND 4 SECTIONS TABS */}
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-2xl border shadow-xs">
+        {/* Section Tabs */}
+        <div className="flex border-b border-gray-200 w-full md:w-auto overflow-x-auto">
+          <button
+            onClick={() => setActiveSection('pending')}
+            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${activeSection === 'pending' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
+          >
+            Pending Bills
+            {pendingCount > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveSection('paid')}
+            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${activeSection === 'paid' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
+          >
+            Paid Bills
+            {paidCount > 0 && (
+              <span className="bg-green-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                {paidCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveSection('invoices')}
+            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all whitespace-nowrap ${activeSection === 'invoices' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
+          >
+            Invoices Master
+          </button>
+          <button
+            onClick={() => setActiveSection('history')}
+            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all whitespace-nowrap ${activeSection === 'history' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
+          >
+            Payment History
+          </button>
+        </div>
+
+        {/* Search Bar */}
+        <div className="flex items-center gap-2 border rounded-xl px-3 py-2 min-w-[240px] w-full md:w-auto bg-gray-50/50">
           <SearchIcon className="text-gray-400" size={16} />
           <input
             type="text"
-            placeholder="Search by Bill Number, Patient or Doctor..."
+            placeholder="Search invoice or patient..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="outline-none text-xs w-full bg-transparent font-medium"
           />
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
-          {['all', 'pending', 'paid'].map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition capitalize flex-1 md:flex-none ${
-                statusFilter === f 
-                  ? 'bg-primary text-white shadow-md shadow-primary/20' 
-                  : 'bg-white border text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {f === 'all' ? 'All Bills' : f === 'pending' ? 'Unpaid / Pending' : 'Paid'}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* BILLS TABLE LIST */}
-      <div className="bg-white border rounded-2xl shadow-xs overflow-hidden">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
-              <th className="p-3">Bill Number</th>
-              <th className="p-3">Patient / Doctor</th>
-              <th className="p-3">Visit Date</th>
-              <th className="p-3">Room Category</th>
-              <th className="p-3">Total Amount</th>
-              <th className="p-3">Paid</th>
-              <th className="p-3">Payment Status</th>
-              <th className="p-3 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredBills.length === 0 ? (
-              <tr>
-                <td colSpan="8" className="p-6 text-center text-gray-400 italic">No billing records found matching selection.</td>
-              </tr>
-            ) : (
-              filteredBills.map((bill, index) => {
-                let statusClass = 'bg-amber-50 text-amber-600 border-amber-200';
-                if (bill.paymentStatus === 'Paid') statusClass = 'bg-green-50 text-green-600 border-green-200';
-                if (bill.paymentStatus === 'Partially Paid') statusClass = 'bg-blue-50 text-blue-600 border-blue-200';
-                if (bill.paymentStatus === 'Cancelled') statusClass = 'bg-red-50 text-red-600 border-red-200';
-
-                return (
-                  <tr key={index} className="border-b hover:bg-gray-50/50">
-                    <td className="p-3 font-bold text-gray-800">{bill.billNumber}</td>
-                    <td className="p-3">
-                      <span className="font-semibold text-gray-850 block">{bill.patientName}</span>
-                      <span className="text-[10px] text-gray-400 block font-light">Doctor: Dr. {bill.doctorName}</span>
-                    </td>
-                    <td className="p-3 font-medium">{bill.appointmentDate}</td>
-                    <td className="p-3 text-gray-500 font-medium">
-                      {bill.roomCategory ? `${bill.roomCategory} (Rm ${bill.roomNumber})` : 'Outpatient (None)'}
-                    </td>
-                    <td className="p-3 font-bold text-gray-800">₹{bill.totalAmount}</td>
-                    <td className="p-3 font-semibold text-green-600">₹{bill.paidAmount}</td>
-                    <td className="p-3">
-                      <span className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${statusClass}`}>
-                        {bill.paymentStatus}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex gap-2 justify-center">
-                        <button
-                          onClick={() => handlePrintBill(bill)}
-                          className="border border-blue-200 text-blue-650 hover:bg-blue-50 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
-                          title="Generate & print invoice"
-                        >
-                          <PrinterIcon size={12} /> Invoice
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedBill(bill)
-                            setConsultFee(bill.consultationFee)
-                            setRoomChgs(bill.roomCharges)
-                            setOtherChgs(bill.otherCharges)
-                            setShowEditModal(true)
-                          }}
-                          className="border border-gray-200 text-gray-600 hover:bg-gray-50 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
-                          title="Update bill item charges"
-                        >
-                          <EditIcon size={12} /> Charges
-                        </button>
-                        {bill.paymentStatus !== 'Paid' && (
-                          <button
-                            onClick={() => {
-                              setSelectedBill(bill)
-                              setAmountPaid(Math.max(0, bill.totalAmount - bill.paidAmount))
-                              setShowPaidModal(true)
-                            }}
-                            className="bg-green-550 border border px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-0.5 transition shadow-xs"
-                            title="Register payment receipt"
-                          >
-                            <DollarSignIcon size={12} /> Collect
-                          </button>
-                        )}
-                      </div>
-                    </td>
+      {/* SECTION CONTENT DISPLAY */}
+      <div className="bg-white border rounded-2xl shadow-xs overflow-hidden min-h-[400px]">
+        
+        {/* SECTION 1: PENDING BILLS */}
+        {activeSection === 'pending' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
+                  <th className="p-3">Bill Number</th>
+                  <th className="p-3">Patient / Doctor</th>
+                  <th className="p-3">Due Date</th>
+                  <th className="p-3">Total Amount</th>
+                  <th className="p-3">Amount Paid</th>
+                  <th className="p-3">Outstanding Dues</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingBills.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="p-6 text-center text-gray-400 italic">No pending or unpaid bills found.</td>
                   </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
+                ) : (
+                  pendingBills.map((bill, index) => {
+                    const dues = Math.max(0, bill.totalAmount - bill.paidAmount)
+                    return (
+                      <tr key={index} className="border-b hover:bg-gray-50/50">
+                        <td className="p-3 font-bold text-gray-800">{bill.billNumber}</td>
+                        <td className="p-3">
+                          <span className="font-semibold text-gray-850 block">{bill.patientName}</span>
+                          <span className="text-[10px] text-gray-400 block">Doctor: Dr. {bill.doctorName}</span>
+                        </td>
+                        <td className="p-3 text-gray-600 font-medium">{new Date(bill.dueDate).toLocaleDateString()}</td>
+                        <td className="p-3 font-bold text-gray-800">₹{bill.totalAmount}</td>
+                        <td className="p-3 font-semibold text-emerald-600">₹{bill.paidAmount}</td>
+                        <td className="p-3 font-bold text-red-600">₹{dues}</td>
+                        <td className="p-3">
+                          <span className="text-[10px] font-bold border px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border-amber-200">
+                            {bill.paymentStatus}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => {
+                                setSelectedBill(bill)
+                                setAmountPaid(dues)
+                                setShowPaidModal(true)
+                              }}
+                              className="bg-emerald-600 text-white hover:bg-emerald-700 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
+                            >
+                              <DollarSignIcon size={12} /> Collect ₹{dues}
+                            </button>
+                            <button
+                              onClick={() => handlePrintBill(bill)}
+                              className="border border-blue-200 text-blue-600 hover:bg-blue-50 px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                            >
+                              <PrinterIcon size={12} /> Invoice
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* SECTION 2: PAID BILLS */}
+        {activeSection === 'paid' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
+                  <th className="p-3">Bill Number</th>
+                  <th className="p-3">Patient</th>
+                  <th className="p-3">Doctor</th>
+                  <th className="p-3">Total Paid</th>
+                  <th className="p-3">Payment Method</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paidBills.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="p-6 text-center text-gray-400 italic">No fully paid hospital bills recorded.</td>
+                  </tr>
+                ) : (
+                  paidBills.map((bill, index) => {
+                    const lastPayment = bill.paymentHistory?.[bill.paymentHistory.length - 1]
+                    return (
+                      <tr key={index} className="border-b hover:bg-gray-50/50">
+                        <td className="p-3 font-bold text-gray-800">{bill.billNumber}</td>
+                        <td className="p-3 font-semibold text-gray-800">{bill.patientName}</td>
+                        <td className="p-3 text-gray-600">Dr. {bill.doctorName}</td>
+                        <td className="p-3 font-bold text-emerald-600">₹{bill.paidAmount}</td>
+                        <td className="p-3 capitalize text-gray-600">{lastPayment?.paymentMethod || 'Cash'}</td>
+                        <td className="p-3">
+                          <span className="text-[10px] font-bold border px-2 py-0.5 rounded-full bg-green-50 text-green-600 border-green-200">
+                            Paid In Full
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handlePrintBill(bill)}
+                              className="border border-blue-200 text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                            >
+                              <PrinterIcon size={12} /> Print Receipt
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* SECTION 3: INVOICES MASTER */}
+        {activeSection === 'invoices' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
+                  <th className="p-3">Bill Number</th>
+                  <th className="p-3">Patient / Doctor</th>
+                  <th className="p-3">Visit Date</th>
+                  <th className="p-3">Room / Category</th>
+                  <th className="p-3">Total Amount</th>
+                  <th className="p-3">Paid Amount</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="p-6 text-center text-gray-400 italic">No invoices generated yet.</td>
+                  </tr>
+                ) : (
+                  allInvoices.map((bill, index) => {
+                    let statusClass = 'bg-amber-50 text-amber-600 border-amber-200';
+                    if (bill.paymentStatus === 'Paid') statusClass = 'bg-green-50 text-green-600 border-green-200';
+                    if (bill.paymentStatus === 'Partially Paid') statusClass = 'bg-blue-50 text-blue-600 border-blue-200';
+
+                    return (
+                      <tr key={index} className="border-b hover:bg-gray-50/50">
+                        <td className="p-3 font-bold text-gray-800">{bill.billNumber}</td>
+                        <td className="p-3">
+                          <span className="font-semibold text-gray-800 block">{bill.patientName}</span>
+                          <span className="text-[10px] text-gray-400">Dr. {bill.doctorName}</span>
+                        </td>
+                        <td className="p-3 text-gray-600 font-medium">{bill.appointmentDate}</td>
+                        <td className="p-3 text-gray-500">
+                          {bill.roomCategory ? `${bill.roomCategory} (Rm ${bill.roomNumber})` : 'Outpatient'}
+                        </td>
+                        <td className="p-3 font-bold text-gray-800">₹{bill.totalAmount}</td>
+                        <td className="p-3 font-semibold text-emerald-600">₹{bill.paidAmount}</td>
+                        <td className="p-3">
+                          <span className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${statusClass}`}>
+                            {bill.paymentStatus}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handlePrintBill(bill)}
+                              className="border border-blue-200 text-blue-600 hover:bg-blue-50 px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                            >
+                              <PrinterIcon size={12} /> Print
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedBill(bill)
+                                setConsultFee(bill.consultationFee)
+                                setRoomChgs(bill.roomCharges)
+                                setOtherChgs(bill.otherCharges)
+                                setShowEditModal(true)
+                              }}
+                              className="border border-gray-200 text-gray-600 hover:bg-gray-50 px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                            >
+                              <EditIcon size={12} /> Charges
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* SECTION 4: PAYMENT HISTORY */}
+        {activeSection === 'history' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
+                  <th className="p-3">Date & Time</th>
+                  <th className="p-3">Bill Number</th>
+                  <th className="p-3">Patient Name</th>
+                  <th className="p-3">Attending Doctor</th>
+                  <th className="p-3">Amount Received</th>
+                  <th className="p-3">Payment Method</th>
+                  <th className="p-3">Transaction ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="p-6 text-center text-gray-400 italic">No transaction history logs recorded.</td>
+                  </tr>
+                ) : (
+                  paymentLogs.map((log, index) => (
+                    <tr key={index} className="border-b hover:bg-gray-50/50">
+                      <td className="p-3 font-medium text-gray-600">
+                        {new Date(log.paymentDate).toLocaleString()}
+                      </td>
+                      <td className="p-3 font-bold text-gray-800">{log.billNumber}</td>
+                      <td className="p-3 font-semibold text-gray-800">{log.patientName}</td>
+                      <td className="p-3 text-gray-600">Dr. {log.doctorName}</td>
+                      <td className="p-3 font-bold text-emerald-600">₹{log.amountPaid}</td>
+                      <td className="p-3 font-medium capitalize text-gray-700">{log.paymentMethod}</td>
+                      <td className="p-3 font-mono text-[10px] text-gray-500">{log.transactionId}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
       </div>
 
       {/* MODAL 1: MARK AS PAID */}
@@ -448,7 +711,7 @@ const BillingManagement = () => {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border">
             <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-1">
-              <DollarSignIcon className="text-green-550" size={16} /> Collect Payment Dues
+              <DollarSignIcon className="text-emerald-600" size={16} /> Collect Payment Dues
             </h3>
             <p className="text-[11px] text-gray-400 mb-4">
               Enter payment details for invoice <span className="font-bold text-gray-700">{selectedBill.billNumber}</span>. Total remaining balance is <span className="font-bold text-red-500">₹{selectedBill.totalAmount - selectedBill.paidAmount}</span>.
@@ -482,7 +745,7 @@ const BillingManagement = () => {
                 <button
                   type="button"
                   onClick={() => setShowPaidModal(false)}
-                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold"
+                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold text-gray-600"
                 >
                   Cancel
                 </button>
@@ -544,7 +807,7 @@ const BillingManagement = () => {
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold"
+                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold text-gray-600"
                 >
                   Cancel
                 </button>
@@ -587,7 +850,7 @@ const BillingManagement = () => {
                   ))}
                 </select>
                 {billingCandidates.length === 0 && (
-                  <p className="text-[10px] text-red-500 font-bold mt-1">No completed clinical visits await manual invoice generation.</p>
+                  <p className="text-[10px] text-amber-600 font-bold mt-1">No completed clinical visits await manual invoice generation.</p>
                 )}
               </div>
 
@@ -595,7 +858,7 @@ const BillingManagement = () => {
                 <button
                   type="button"
                   onClick={() => setShowGenerateModal(false)}
-                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold"
+                  className="px-4 py-2 border rounded-xl hover:bg-gray-50 font-bold text-gray-600"
                 >
                   Cancel
                 </button>

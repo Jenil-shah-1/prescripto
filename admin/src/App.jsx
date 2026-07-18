@@ -12,6 +12,7 @@ import AddDoctor from './pages/Admin/AddDoctor';
 import DoctorsList from './pages/Admin/DoctorsList';
 import RoomManagement from './pages/Admin/RoomManagement';
 import BillingManagement from './pages/Admin/BillingManagement';
+import Analytics from './pages/Admin/Analytics';
 import Login from './pages/Login';
 import DoctorAppointments from './pages/Doctor/DoctorAppointments';
 import DoctorDashboard from './pages/Doctor/DoctorDashboard';
@@ -36,6 +37,7 @@ const App = () => {
           <Route path='/doctor-list' element={<DoctorsList />} />
           <Route path='/room-management' element={<RoomManagement />} />
           <Route path='/billing-management' element={<BillingManagement />} />
+          <Route path='/analytics' element={<Analytics />} />
           <Route path='/doctor-dashboard' element={<DoctorDashboard />} />
           <Route path='/doctor-appointments' element={<DoctorAppointments />} />
           <Route path='/doctor-profile' element={<DoctorProfile />} />

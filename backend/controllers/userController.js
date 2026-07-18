@@ -11,6 +11,7 @@ import { sendPaymentReceipt } from './emailsender.js';
 import paymentModel from "../models/paymentModel.js";
 import notificationModel from "../models/notificationModel.js";
 import billModel from "../models/billModel.js";
+import { generateBill } from "../utils/billGenerator.js";
 
 // Gateway Initialize
 const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY)
@@ -632,15 +633,109 @@ const getPatientMedicalHistory = async (req, res) => {
     }
 }
 
-// API to retrieve patient's bills
+// API to retrieve patient's bills (strictly for logged-in user)
 const getBillsUser = async (req, res) => {
     try {
         const { userId } = req.body // from authUser middleware
-        const bills = await billModel.find({ userId }).sort({ createdAt: -1 })
-        res.json({ success: true, bills })
+
+        if (!userId) {
+            return res.json({ success: false, message: "User not authenticated" })
+        }
+
+        // Fetch all appointments for this user
+        const appointments = await appointmentModel.find({ 
+            $or: [{ userId: userId }, { userId: userId.toString() }] 
+        });
+
+        // Ensure every appointment has a corresponding bill generated in MongoDB
+        for (const appt of appointments) {
+            try {
+                const apptIdStr = appt._id.toString();
+                const billExists = await billModel.findOne({ 
+                    $or: [{ appointmentId: apptIdStr }, { appointmentId: appt._id }] 
+                });
+                if (!billExists) {
+                    await generateBill(appt._id);
+                }
+            } catch (err) {
+                console.log("Error generating bill for appt:", appt._id, err);
+            }
+        }
+
+        // Fetch all bills from billModel for this user
+        let bills = await billModel.find({ 
+            $or: [{ userId: userId }, { userId: userId.toString() }] 
+        }).sort({ billDate: -1, createdAt: -1 });
+
+        // Fallback: If any appointment doesn't have a bill object in bills array yet, build invoice representation from appointment
+        for (const appt of appointments) {
+            const apptIdStr = appt._id.toString();
+            const inBills = bills.some(b => b.appointmentId === apptIdStr);
+            if (!inBills) {
+                const ROOM_RATES = {
+                    "General Ward": 400,
+                    "Semi Private / Twin Sharing": 1000,
+                    "Twin Sharing": 1000,
+                    "Private Room": 2000,
+                    "Private": 2000,
+                    "ICU": 5000
+                };
+                const roomRate = ROOM_RATES[appt.roomCategory] || 400;
+                let roomDays = 0;
+                let roomCharges = 0;
+                if (appt.roomRequested && appt.roomAdmissionDate) {
+                    const disTime = appt.roomDischargedAt || Date.now();
+                    const diffTime = Math.abs(disTime - appt.roomAdmissionDate);
+                    roomDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+                    roomCharges = roomDays * roomRate;
+                }
+                const consultationFee = appt.amount || 0;
+                const totalAmount = consultationFee + roomCharges;
+                const paidAmount = appt.paidAmount || (appt.payment ? totalAmount : 0);
+                let paymentStatus = "Pending";
+                if (paidAmount >= totalAmount && totalAmount > 0) {
+                    paymentStatus = "Paid";
+                } else if (paidAmount > 0) {
+                    paymentStatus = "Partially Paid";
+                }
+
+                bills.push({
+                    _id: appt._id,
+                    billNumber: `BILL-${appt._id.toString().slice(-6).toUpperCase()}`,
+                    appointmentId: apptIdStr,
+                    userId: appt.userId,
+                    docId: appt.docId,
+                    patientName: appt.userData?.name || "Patient",
+                    doctorName: appt.docData?.name || "Doctor",
+                    appointmentDate: appt.slotDate || "",
+                    billDate: appt.date || Date.now(),
+                    dueDate: (appt.date || Date.now()) + 7 * 24 * 60 * 60 * 1000,
+                    consultationFee,
+                    roomCategory: appt.roomRequested ? (appt.roomCategory || "") : "",
+                    roomNumber: appt.roomRequested ? (appt.roomNumber || "") : "",
+                    roomAdmissionDate: appt.roomAdmissionDate || null,
+                    roomDischargeDate: appt.roomDischargedAt || null,
+                    roomDays,
+                    roomRatePerDay: roomRate,
+                    roomCharges,
+                    otherCharges: 0,
+                    totalAmount,
+                    paidAmount,
+                    paymentStatus,
+                    paymentHistory: paidAmount > 0 ? [{
+                        paymentDate: appt.date || Date.now(),
+                        amountPaid: paidAmount,
+                        paymentMethod: "Online Payment",
+                        transactionId: "TXN-PAID"
+                    }] : []
+                });
+            }
+        }
+
+        res.json({ success: true, bills });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log("getBillsUser Error:", error);
+        res.json({ success: false, message: error.message });
     }
 }
 
@@ -648,8 +743,10 @@ const getBillsUser = async (req, res) => {
 const getPaymentHistoryUser = async (req, res) => {
     try {
         const { userId } = req.body // from authUser middleware
-        const bills = await billModel.find({ userId })
-        let history = []
+        const bills = await billModel.find({ 
+            $or: [{ userId: userId }, { userId: userId.toString() }] 
+        });
+        let history = [];
         bills.forEach(bill => {
             if (bill.paymentHistory && Array.isArray(bill.paymentHistory)) {
                 bill.paymentHistory.forEach(item => {
@@ -662,15 +759,15 @@ const getPaymentHistoryUser = async (req, res) => {
                         transactionId: item.transactionId || 'N/A',
                         doctorName: bill.doctorName,
                         appointmentDate: bill.appointmentDate
-                    })
-                })
+                    });
+                });
             }
-        })
-        history.sort((a, b) => b.paymentDate - a.paymentDate)
-        res.json({ success: true, history })
+        });
+        history.sort((a, b) => b.paymentDate - a.paymentDate);
+        res.json({ success: true, history });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log("getPaymentHistoryUser Error:", error);
+        res.json({ success: false, message: error.message });
     }
 }
 

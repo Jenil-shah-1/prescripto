@@ -17,9 +17,7 @@ const PatientSidebar = ({ activeTab, setActiveTab }) => {
     { id: 'my-appointments', label: 'My Appointments', icon: LuCalendar },
     { id: 'upcoming', label: 'Upcoming Appointments', icon: LuCalendar },
     { id: 'room-requests', label: 'Room Requests', icon: LuBed },
-    { id: 'current-admission', label: 'Current Admission', icon: LuBed },
     { id: 'history', label: 'Medical History', icon: LuHistory },
-    { id: 'billing-payments', label: 'Billing & Payments', icon: LuCreditCard },
   ]
 
   const activeStyle = 'flex items-center gap-3.5 py-4 px-6 md:px-10 md:min-w-64 w-full cursor-pointer bg-[#F2F3FF] border-r-4 border-primary text-[#111] font-semibold transition-all duration-200 text-left'

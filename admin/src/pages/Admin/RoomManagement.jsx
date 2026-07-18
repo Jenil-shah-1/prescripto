@@ -55,7 +55,8 @@ const RoomManagement = () => {
     dischargeRoom,
     cancelRoomRequest,
     approveRoomRequest,
-    rejectRoomRequest
+    rejectRoomRequest,
+    getEligiblePatients
   } = useContext(AdminContext)
 
   const { slotDateFormat } = useContext(AppContext)
@@ -73,6 +74,7 @@ const RoomManagement = () => {
   const [showDischargeModal, setShowDischargeModal] = useState(false)
   const [selectedAppt, setSelectedAppt] = useState(null)
   const [selectedCategory, setSelectedCategory] = useState('General Ward')
+  const [eligiblePatients, setEligiblePatients] = useState([])
   
   // Form parameters
   const [targetRoomNo, setTargetRoomNo] = useState('')
@@ -86,6 +88,24 @@ const RoomManagement = () => {
       getAllAppointments()
     }
   }, [aToken])
+
+  const openAssignModalForAppt = async (appt = null) => {
+    const list = await getEligiblePatients()
+    setEligiblePatients(list)
+    if (appt) {
+      setSelectedAppt(appt)
+      if (appt.roomCategory) setSelectedCategory(appt.roomCategory)
+    } else if (list.length > 0) {
+      setSelectedAppt(list[0])
+      if (list[0].roomCategory) setSelectedCategory(list[0].roomCategory)
+    } else {
+      setSelectedAppt(null)
+    }
+    setTargetRoomNo('')
+    setAdmissionDate(new Date().toISOString().split('T')[0])
+    setExpectedDischarge('')
+    setShowAssignModal(true)
+  }
 
   // Get active rooms that have available capacity for a specific category
   const getAvailableRoomsForCategory = (category) => {
@@ -176,13 +196,22 @@ const RoomManagement = () => {
     <div className="m-5 flex flex-col gap-6 text-sm text-[#4A4A4A] w-full max-w-7xl">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-gray-800">Hospital Room Management</h2>
-        <button 
-          onClick={() => { getRooms(); getAllAppointments(); }}
-          className="flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-primary-dark transition shadow"
-        >
-          <RefreshCwIcon size={14} className="animate-spin-slow" />
-          Refresh Stats
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => openAssignModalForAppt()}
+            className="flex items-center gap-1.5 bg-primary text-white px-4 py-2 rounded-xl text-xs font-semibold hover:bg-primary-dark transition shadow"
+          >
+            <UserPlusIcon size={14} />
+            Assign Room
+          </button>
+          <button 
+            onClick={() => { getRooms(); getAllAppointments(); }}
+            className="flex items-center gap-1.5 bg-gray-100 text-gray-700 px-4 py-2 rounded-xl text-xs font-semibold hover:bg-gray-200 transition"
+          >
+            <RefreshCwIcon size={14} />
+            Refresh Stats
+          </button>
+        </div>
       </div>
 
       {/* Stats Counter Grid */}
@@ -256,12 +285,6 @@ const RoomManagement = () => {
           className={`py-3 px-6 font-semibold border-b-2 transition-all ${activeTab === 'admissions' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
         >
           Active Patient Admissions
-        </button>
-        <button
-          onClick={() => setActiveTab('active-patients')}
-          className={`py-3 px-6 font-semibold border-b-2 transition-all ${activeTab === 'active-patients' ? 'border-primary text-primary' : 'border-transparent text-gray-400'}`}
-        >
-          Active Patients
         </button>
       </div>
 
@@ -447,13 +470,7 @@ const RoomManagement = () => {
 
                               {(appt.roomStatus === 'Pending' || appt.roomStatus === 'Approved') && (
                                 <button
-                                  onClick={() => {
-                                    setSelectedAppt(appt);
-                                    setTargetRoomNo('');
-                                    setAdmissionDate(new Date().toISOString().split('T')[0]);
-                                    setExpectedDischarge('');
-                                    setShowAssignModal(true);
-                                  }}
+                                  onClick={() => openAssignModalForAppt(appt)}
                                   className="bg-primary text-white px-2.5 py-1 rounded font-bold hover:bg-primary-dark transition text-[10px]"
                                 >
                                   Assign Room
@@ -617,128 +634,51 @@ const RoomManagement = () => {
             </div>
           </div>
         )}
-
-        {activeTab === 'active-patients' && (
-          <div>
-            <h3 className="text-base font-bold text-gray-800 mb-4">Active Patients (Accepted but not Completed)</h3>
-            
-            {/* Search and Filters */}
-            <div className="flex flex-wrap gap-3 mb-5 items-center bg-gray-50 p-4 rounded-xl border border-gray-150">
-              <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-                <label className="text-[10px] font-bold text-gray-400 uppercase">Search</label>
-                <input 
-                  type="text"
-                  placeholder="Search patient or doctor name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="border rounded-lg px-3 py-2 text-xs outline-primary bg-white text-gray-800"
-                />
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
-                    <th className="p-3">Patient Name</th>
-                    <th className="p-3">Doctor</th>
-                    <th className="p-3">Appointment Date</th>
-                    <th className="p-3">Appointment Time</th>
-                    <th className="p-3">Appointment Status</th>
-                    <th className="p-3">Requested Room</th>
-                    <th className="p-3 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const activePatients = appointments.filter(appt => {
-                      const isAcceptedState = appt.isAccepted || appt.status === 'accepted' || appt.status === 'Accepted & Scheduled' || appt.status === 'Follow-up Scheduled';
-                      const isCompletedState = appt.isCompleted || appt.status === 'completed';
-                      const isCandidate = isAcceptedState && !isCompletedState && !appt.cancelled && !appt.isRejected && appt.roomStatus !== 'Allocated';
-                      
-                      if (!isCandidate) return false;
-                      
-                      const matchesSearch = 
-                        appt.userData.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        appt.docData.name.toLowerCase().includes(searchQuery.toLowerCase());
-                      return matchesSearch;
-                    });
-
-                    if (activePatients.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan="7" className="p-6 text-center text-gray-400 italic">No active patients ready for room allocation.</td>
-                        </tr>
-                      );
-                    }
-
-                    return activePatients.map((appt, index) => (
-                      <tr key={index} className="border-b hover:bg-gray-50/50">
-                        <td className="p-3 font-semibold text-gray-800">{appt.userData.name}</td>
-                        <td className="p-3 text-gray-600">Dr. {appt.docData.name}</td>
-                        <td className="p-3 text-gray-600">{slotDateFormat ? slotDateFormat(appt.slotDate) : appt.slotDate}</td>
-                        <td className="p-3 text-gray-600">{appt.slotTime}</td>
-                        <td className="p-3">
-                          <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 font-bold px-2 py-0.5 rounded-full uppercase">
-                            {appt.status}
-                          </span>
-                        </td>
-                        <td className="p-3 text-gray-600 font-bold">
-                          {appt.roomRequested ? (
-                            <span className="text-primary">{appt.roomCategory}</span>
-                          ) : (
-                            <span className="text-gray-455 italic font-normal">No Request</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <div className="flex gap-2 justify-center">
-                            <button
-                              onClick={() => {
-                                setSelectedAppt(appt)
-                                setTargetRoomNo('')
-                                setAdmissionDate(new Date().toISOString().split('T')[0])
-                                setExpectedDischarge('')
-                                setSelectedCategory(appt.roomCategory || 'General Ward')
-                                setShowAssignModal(true)
-                              }}
-                              className="bg-primary text-white px-3 py-1.5 rounded-lg font-bold hover:bg-primary-dark transition text-[10px]"
-                            >
-                              Admit Patient
-                            </button>
-                            <button
-                              onClick={() => {
-                                alert(`Patient details:\nName: ${appt.userData.name}\nGender: ${appt.userData.gender}\nDOB: ${appt.userData.dob}\nPhone: ${appt.userData.phone}\nDoctor: ${appt.docData.name}\nSpeciality: ${appt.docData.speciality}`)
-                              }}
-                              className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition text-[10px]"
-                            >
-                              View Details
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Assign Room Modal */}
-      {showAssignModal && selectedAppt && (
+      {showAssignModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
             <h3 className="text-base font-bold text-gray-800 mb-4">Assign Room Admission</h3>
-            <div className="p-3 bg-gray-50 border rounded-xl text-xs mb-4">
-              <p><span className="font-semibold">Patient:</span> {selectedAppt.userData.name}</p>
-              <p><span className="font-semibold">Doctor:</span> {selectedAppt.docData.name}</p>
-              {selectedAppt.roomRequested && (
-                <p><span className="font-semibold text-primary">Requested Category:</span> {selectedAppt.roomCategory}</p>
-              )}
-            </div>
             
             <form onSubmit={handleAssignSubmit} className="flex flex-col gap-4 text-xs">
+              <div className="flex flex-col gap-1">
+                <label className="font-bold text-gray-700">Select Eligible Patient (Accepted & Not Completed) *</label>
+                <select
+                  required
+                  value={selectedAppt?._id || ''}
+                  onChange={(e) => {
+                    const found = eligiblePatients.find(p => p._id === e.target.value);
+                    setSelectedAppt(found || null);
+                    if (found && found.roomCategory) {
+                      setSelectedCategory(found.roomCategory);
+                    }
+                  }}
+                  className="border rounded p-2 bg-white text-gray-800 font-semibold"
+                >
+                  <option value="">-- Choose Patient / Appointment --</option>
+                  {eligiblePatients.map((appt, idx) => (
+                    <option key={idx} value={appt._id}>
+                      {appt.userData.name} (Dr. {appt.docData.name} - {appt.slotDate}) {appt.roomRequested ? `[Req: ${appt.roomCategory}]` : ''}
+                    </option>
+                  ))}
+                </select>
+                {eligiblePatients.length === 0 && (
+                  <p className="text-[10px] text-amber-600 font-semibold mt-1">No eligible patients currently available (must be Accepted & not Completed).</p>
+                )}
+              </div>
+
+              {selectedAppt && (
+                <div className="p-3 bg-gray-50 border rounded-xl text-xs flex flex-col gap-1">
+                  <p><span className="font-semibold text-gray-700">Patient:</span> {selectedAppt.userData.name}</p>
+                  <p><span className="font-semibold text-gray-700">Doctor:</span> Dr. {selectedAppt.docData.name}</p>
+                  {selectedAppt.roomRequested && (
+                    <p><span className="font-semibold text-primary">Requested Category:</span> {selectedAppt.roomCategory}</p>
+                  )}
+                </div>
+              )}
+              
               <div className="flex flex-col gap-1">
                 <label className="font-bold text-gray-700">Select Room Category *</label>
                 <select

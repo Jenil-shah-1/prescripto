@@ -205,6 +205,10 @@ const App = () => {
           <Route path='/dashboard' element={token ? <Navigate to="/patient/dashboard" replace /> : <Navigate to="/login-select" replace />} />
           <Route path='/my-appointments' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'my-appointments' }} replace /> : <Navigate to="/login-select" replace />} />
           <Route path='/my-profile' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'profile' }} replace /> : <Navigate to="/login-select" replace />} />
+          <Route path='/my-bills' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'billing-payments' }} replace /> : <Navigate to="/login-select" replace />} />
+          <Route path='/billing' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'billing-payments' }} replace /> : <Navigate to="/login-select" replace />} />
+          <Route path='/bills' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'billing-payments' }} replace /> : <Navigate to="/login-select" replace />} />
+          <Route path='/payment-history' element={token ? <Navigate to="/patient/dashboard" state={{ tab: 'billing-payments' }} replace /> : <Navigate to="/login-select" replace />} />
           
           {/* Non-authenticated redirect for patient portal path */}
           <Route path='/patient/*' element={token ? <Navigate to="/patient/dashboard" replace /> : <Navigate to="/login-select" replace />} />

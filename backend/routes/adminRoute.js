@@ -1,5 +1,5 @@
 import express from 'express';
-import { loginAdmin, appointmentsAdmin, appointmentCancel, addDoctor, allDoctors, adminDashboard, getRoomsAdmin, assignRoomAdmin, transferRoomAdmin, dischargeRoomAdmin, cancelRoomRequestAdmin, rejectRoomRequestAdmin, approveRoomRequestAdmin, getBillsAdmin, markBillPaidAdmin, generateBillAdmin, updateChargesAdmin } from '../controllers/adminController.js';
+import { loginAdmin, appointmentsAdmin, appointmentCancel, addDoctor, allDoctors, adminDashboard, getRoomsAdmin, assignRoomAdmin, transferRoomAdmin, dischargeRoomAdmin, cancelRoomRequestAdmin, rejectRoomRequestAdmin, approveRoomRequestAdmin, getBillsAdmin, markBillPaidAdmin, generateBillAdmin, updateChargesAdmin, getEligiblePatientsAdmin, getAnalyticsAdmin } from '../controllers/adminController.js';
 import { changeAvailablity, appointmentComplete } from '../controllers/doctorController.js';
 import authAdmin from '../middleware/authAdmin.js';
 import upload from '../middleware/multer.js';
@@ -12,9 +12,11 @@ adminRouter.post("/cancel-appointment", authAdmin, appointmentCancel)
 adminRouter.get("/all-doctors", authAdmin, allDoctors)
 adminRouter.post("/change-availability", authAdmin, changeAvailablity)
 adminRouter.get("/dashboard", authAdmin, adminDashboard)
+adminRouter.get("/analytics", authAdmin, getAnalyticsAdmin)
 
 // Room Management Routes
 adminRouter.get("/rooms", authAdmin, getRoomsAdmin)
+adminRouter.get("/eligible-patients", authAdmin, getEligiblePatientsAdmin)
 adminRouter.post("/room-assign", authAdmin, assignRoomAdmin)
 adminRouter.post("/room-transfer", authAdmin, transferRoomAdmin)
 adminRouter.post("/room-discharge", authAdmin, dischargeRoomAdmin)

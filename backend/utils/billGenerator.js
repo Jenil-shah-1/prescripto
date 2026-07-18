@@ -100,8 +100,14 @@ const generateBill = async (appointmentId, customDischargeDate = null) => {
             roomCharges = roomDays * roomRate
         }
 
-        const count = await billModel.countDocuments()
-        const billNumber = `BILL-${10001 + count}`
+        let count = await billModel.countDocuments()
+        let billNumber = `BILL-${10001 + count}`
+        let exists = await billModel.findOne({ billNumber })
+        while (exists) {
+            count++
+            billNumber = `BILL-${10001 + count}`
+            exists = await billModel.findOne({ billNumber })
+        }
 
         const consultationFee = appointment.amount || 0
         const otherCharges = 0
@@ -120,9 +126,9 @@ const generateBill = async (appointmentId, customDischargeDate = null) => {
             appointmentId: appointment._id.toString(),
             userId: appointment.userId,
             docId: appointment.docId,
-            patientName: appointment.userData.name,
-            doctorName: appointment.docData.name,
-            appointmentDate: appointment.slotDate,
+            patientName: appointment.userData?.name || "Patient",
+            doctorName: appointment.docData?.name || "Doctor",
+            appointmentDate: appointment.slotDate || "",
             billDate: Date.now(),
             dueDate: Date.now() + 7 * 24 * 60 * 60 * 1000, // Due in 7 days
             consultationFee,

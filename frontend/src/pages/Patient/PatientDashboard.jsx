@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { AppContext } from '../../context/AppContext'
 import PatientSidebar from '../../components/PatientSidebar'
+import EmptyState from '../../components/EmptyState'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { assets } from '../../assets/assets'
@@ -449,25 +450,37 @@ const PatientDashboard = () => {
     }
   }
 
+  const safeFormatDate = (dateVal) => {
+    if (!dateVal) return 'N/A'
+    const d = new Date(dateVal)
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString()
+  }
+
   const getBills = async () => {
     try {
       const { data } = await axios.get(backendUrl + '/api/user/bills', { headers: { token } })
-      if (data.success) {
+      if (data && data.success && Array.isArray(data.bills)) {
         setBills(data.bills)
+      } else {
+        setBills([])
       }
     } catch (error) {
-      console.log(error)
+      console.log("getBills error:", error)
+      setBills([])
     }
   }
 
   const getPaymentHistory = async () => {
     try {
       const { data } = await axios.get(backendUrl + '/api/user/payment-history', { headers: { token } })
-      if (data.success) {
+      if (data && data.success && Array.isArray(data.history)) {
         setPaymentHistory(data.history)
+      } else {
+        setPaymentHistory([])
       }
     } catch (error) {
-      console.log(error)
+      console.log("getPaymentHistory error:", error)
+      setPaymentHistory([])
     }
   }
 
@@ -675,6 +688,13 @@ const PatientDashboard = () => {
       getPaymentHistory()
     }
   }, [token])
+
+  useEffect(() => {
+    if (token && activeTab === 'billing-payments') {
+      getBills()
+      getPaymentHistory()
+    }
+  }, [activeTab, token])
 
   // Compute Dashboard Metrics
   const activeAppts = appointments.filter(appt => !appt.isCompleted && !appt.cancelled && !appt.isRejected)
@@ -1219,6 +1239,58 @@ const PatientDashboard = () => {
                         </button>
                       )}
 
+                      {/* View Bill & Download Invoice */}
+                      {(() => {
+                        const matchingBill = (Array.isArray(bills) ? bills : []).find(b => b && b.appointmentId === item._id.toString()) || {
+                          billNumber: `BILL-${item._id.toString().slice(-6).toUpperCase()}`,
+                          appointmentId: item._id.toString(),
+                          userId: item.userId,
+                          docId: item.docId,
+                          patientName: item.userData?.name || "Patient",
+                          doctorName: item.docData?.name || "Doctor",
+                          appointmentDate: item.slotDate || "",
+                          billDate: item.date || Date.now(),
+                          dueDate: (item.date || Date.now()) + 7 * 24 * 60 * 60 * 1000,
+                          consultationFee: item.amount || 0,
+                          roomCategory: item.roomRequested ? (item.roomCategory || "") : "",
+                          roomNumber: item.roomRequested ? (item.roomNumber || "") : "",
+                          roomAdmissionDate: item.roomAdmissionDate || null,
+                          roomDischargeDate: item.roomDischargedAt || null,
+                          roomDays: 0,
+                          roomRatePerDay: 0,
+                          roomCharges: 0,
+                          otherCharges: 0,
+                          totalAmount: item.amount || 0,
+                          paidAmount: item.paidAmount || (item.payment ? item.amount : 0),
+                          paymentStatus: item.payment ? "Paid" : "Pending",
+                          paymentHistory: item.payment ? [{
+                            paymentDate: item.date || Date.now(),
+                            amountPaid: item.paidAmount || item.amount,
+                            paymentMethod: "Online Payment",
+                            transactionId: "TXN-PAID"
+                          }] : []
+                        };
+                        return (
+                          <div className="flex gap-1.5 mt-1">
+                            <button
+                              onClick={() => {
+                                setSelectedBill(matchingBill);
+                                setShowBillModal(true);
+                              }}
+                              className="flex-1 py-1.5 border rounded-lg hover:bg-gray-50 text-gray-700 font-bold text-[10px] transition"
+                            >
+                              View Bill
+                            </button>
+                            <button
+                              onClick={() => handlePrintBill(matchingBill)}
+                              className="flex-1 py-1.5 border border-blue-200 hover:bg-blue-50 text-blue-600 font-bold text-[10px] transition flex items-center justify-center gap-1"
+                            >
+                              <LuPrinter size={12} /> Invoice
+                            </button>
+                          </div>
+                        );
+                      })()}
+
                       {item.cancelled && !item.isCompleted && (
                         <button className="w-full py-2 bg-red-50 text-red-500 border border-red-100 rounded-xl cursor-default font-bold">
                           Cancelled
@@ -1406,13 +1478,13 @@ const PatientDashboard = () => {
           </div>
         )}
 
-        {/* TAB 5: ROOM REQUESTS */}
+        {/* TAB 5: ROOM REQUESTS & ADMISSION DETAILS */}
         {activeTab === 'room-requests' && (
-          <div className="max-w-5xl">
-            <div className="mb-6 flex justify-between items-center">
+          <div className="max-w-5xl flex flex-col gap-6">
+            <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">Hospital Room Requests</h2>
-                <p className="text-gray-500 text-xs">Track active and previous requests submitted by you or recommended by your consulting Doctor.</p>
+                <h2 className="text-xl font-bold text-gray-800">Hospital Room Requests & Inpatient Admission</h2>
+                <p className="text-gray-500 text-xs">Track room requests and view allocated room details including Room Number, Category, Admission Date, Expected Discharge, and Status.</p>
               </div>
               <button 
                 onClick={() => {
@@ -1427,21 +1499,42 @@ const PatientDashboard = () => {
               </button>
             </div>
 
+            {/* If there is an active allocated room admission, show prominent card */}
+            {activeAdmission && (
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="p-3 bg-white/20 rounded-xl">
+                    <LuBed size={24} />
+                  </div>
+                  <div>
+                    <span className="bg-white/30 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">Active Ward Allocation</span>
+                    <h3 className="text-lg font-bold mt-1">Room {activeAdmission.roomNumber} ({activeAdmission.roomCategory})</h3>
+                    <p className="text-xs text-white/90">Doctor: Dr. {activeAdmission.docData.name} | Admitted: {activeAdmission.roomAdmissionDate ? new Date(activeAdmission.roomAdmissionDate).toLocaleDateString() : 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="text-right sm:border-l sm:border-white/20 sm:pl-5">
+                  <p className="text-[10px] uppercase font-bold text-white/80">Expected Discharge</p>
+                  <p className="font-bold text-sm">{activeAdmission.roomExpectedDischarge ? new Date(activeAdmission.roomExpectedDischarge).toLocaleDateString() : 'Pending Doctor review'}</p>
+                </div>
+              </div>
+            )}
+
             <div className="bg-white border rounded-2xl p-5 shadow-sm overflow-hidden">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
                     <th className="p-3">Doctor / Visit</th>
-                    <th className="p-3">Category Requested</th>
-                    <th className="p-3">Requested By</th>
+                    <th className="p-3">Room Category</th>
+                    <th className="p-3">Room Number</th>
+                    <th className="p-3">Admission Date</th>
+                    <th className="p-3">Expected Discharge</th>
                     <th className="p-3">Status</th>
-                    <th className="p-3">Room Detail</th>
                   </tr>
                 </thead>
                 <tbody>
                   {appointments.filter(appt => appt.roomRequested).length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="p-6 text-center text-gray-400 italic">No room admission requests submitted yet.</td>
+                      <td colSpan="6" className="p-6 text-center text-gray-400 italic">No room admission requests submitted yet.</td>
                     </tr>
                   ) : (
                     appointments.filter(appt => appt.roomRequested).map((item, index) => {
@@ -1458,18 +1551,19 @@ const PatientDashboard = () => {
                             <span className="text-[10px] text-gray-400">{slotDateFormat(item.slotDate)}</span>
                           </td>
                           <td className="p-3 font-medium text-primary">{item.roomCategory}</td>
-                          <td className="p-3">
-                            <span className={`text-[9px] font-bold border px-2 py-0.5 rounded-full ${item.roomRequestedBy === 'doctor' ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}>
-                              {item.roomRequestedBy === 'doctor' ? 'Doctor' : 'Patient'}
-                            </span>
+                          <td className="p-3 font-bold text-gray-800">
+                            {item.roomNumber ? `Room ${item.roomNumber}` : 'N/A'}
+                          </td>
+                          <td className="p-3 text-gray-700 font-medium">
+                            {item.roomAdmissionDate ? new Date(item.roomAdmissionDate).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="p-3 text-gray-700">
+                            {item.roomExpectedDischarge ? new Date(item.roomExpectedDischarge).toLocaleDateString() : 'N/A'}
                           </td>
                           <td className="p-3">
                             <span className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${statusClass}`}>
                               {item.roomStatus}
                             </span>
-                          </td>
-                          <td className="p-3 font-bold text-gray-800">
-                            {item.roomNumber ? `Room ${item.roomNumber}` : 'N/A'}
                           </td>
                         </tr>
                       )
@@ -1478,72 +1572,6 @@ const PatientDashboard = () => {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
-
-        {/* TAB 6: CURRENT ADMISSION */}
-        {activeTab === 'current-admission' && (
-          <div className="max-w-2xl">
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-800">Current Hospital Admission</h2>
-              <p className="text-gray-500 text-xs">Verify allocated room coordinates, admission dates, and attending physician details.</p>
-            </div>
-
-            {activeAdmission ? (
-              <div className="bg-white border rounded-2xl p-6 shadow-sm flex flex-col gap-4">
-                <div className="flex items-center gap-4 bg-green-50 border border-green-150 p-4 rounded-xl text-green-700">
-                  <LuBed size={28} />
-                  <div>
-                    <h3 className="font-bold text-sm">Patient Admitted Successfully</h3>
-                    <p className="text-[11px] font-medium opacity-90">Currently assigned to Room {activeAdmission.roomNumber} ({activeAdmission.roomCategory})</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 text-xs text-gray-700 mt-2">
-                  <div className="border p-3.5 rounded-xl">
-                    <p className="text-gray-400 font-bold uppercase text-[9px] tracking-wider mb-1">Ward Category</p>
-                    <p className="font-bold text-gray-800">{activeAdmission.roomCategory}</p>
-                  </div>
-                  <div className="border p-3.5 rounded-xl">
-                    <p className="text-gray-400 font-bold uppercase text-[9px] tracking-wider mb-1">Room Number</p>
-                    <p className="font-bold text-gray-800">Room {activeAdmission.roomNumber}</p>
-                  </div>
-                  <div className="border p-3.5 rounded-xl">
-                    <p className="text-gray-400 font-bold uppercase text-[9px] tracking-wider mb-1">Admission Date</p>
-                    <p className="font-semibold text-gray-800">{new Date(activeAdmission.roomAdmissionDate).toLocaleDateString()}</p>
-                  </div>
-                  <div className="border p-3.5 rounded-xl">
-                    <p className="text-gray-400 font-bold uppercase text-[9px] tracking-wider mb-1">Expected Discharge</p>
-                    <p className="font-semibold text-gray-800">{activeAdmission.roomExpectedDischarge ? new Date(activeAdmission.roomExpectedDischarge).toLocaleDateString() : 'Pending Doctor review'}</p>
-                  </div>
-                  <div className="col-span-2 border p-3.5 rounded-xl flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 font-bold uppercase text-[9px] tracking-wider mb-1">Attending Physician</p>
-                      <p className="font-bold text-gray-800">Dr. {activeAdmission.docData.name}</p>
-                      <p className="text-gray-400 text-[10px]">{activeAdmission.docData.speciality}</p>
-                    </div>
-                    <img className="w-12 h-12 rounded-full object-cover border" src={activeAdmission.docData.image} alt="" />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white border rounded-2xl p-8 text-center shadow-sm">
-                <LuBed className="mx-auto text-gray-300 mb-3" size={48} />
-                <h3 className="font-bold text-gray-700 text-sm">No Active Admission</h3>
-                <p className="text-gray-400 text-xs mt-1 max-w-sm mx-auto">You are not currently admitted to any ward. If required, click below to submit a room admission request.</p>
-                <button
-                  onClick={() => {
-                    const upcomingActive = appointments.find(appt => !appt.isCompleted && !appt.cancelled && !appt.isRejected);
-                    setRoomModalApptId(upcomingActive?._id || '');
-                    setRoomModalCategory('General Ward');
-                    setShowRoomModal(true);
-                  }}
-                  className="mt-4 bg-primary text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-primary-dark transition"
-                >
-                  Submit Admission Request
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -1585,189 +1613,7 @@ const PatientDashboard = () => {
           </div>
         )}
 
-        {/* TAB 8: BILLING & PAYMENTS */}
-        {activeTab === 'billing-payments' && (
-          <div className="max-w-5xl flex flex-col gap-8">
-            <div className="mb-2">
-              <h2 className="text-xl font-bold text-gray-800">Billing & Payments</h2>
-              <p className="text-gray-500 text-xs">Access hospital bills, download invoice PDFs, or pay outstanding dues online.</p>
-            </div>
 
-            {/* Filter buttons */}
-            <div className="flex gap-2.5">
-              {['all', 'pending', 'paid'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setBillFilter(f)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition capitalize ${
-                    billFilter === f 
-                      ? 'bg-primary text-white shadow-md shadow-primary/20' 
-                      : 'bg-white border text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {f === 'all' ? 'All Bills' : f === 'pending' ? 'Pending Payment' : 'Paid Bills'}
-                </button>
-              ))}
-            </div>
-
-            {/* Bill Cards Grid */}
-            <div>
-              <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-1.5">
-                <LuCreditCard className="text-primary" size={16} />
-                Hospital Invoice Records
-              </h3>
-              
-              {(() => {
-                const filteredBills = bills.filter(b => {
-                  if (billFilter === 'pending') return b.paymentStatus !== 'Paid';
-                  if (billFilter === 'paid') return b.paymentStatus === 'Paid';
-                  return true;
-                });
-
-                if (filteredBills.length === 0) {
-                  return (
-                    <p className="text-gray-400 italic text-center py-10 bg-white rounded-2xl border">No billing records found matching this status.</p>
-                  );
-                }
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {filteredBills.map((bill, index) => {
-                      const pendingAmt = Math.max(0, bill.totalAmount - bill.paidAmount);
-                      let statusClass = 'bg-amber-50 text-amber-600 border-amber-200';
-                      if (bill.paymentStatus === 'Paid') statusClass = 'bg-green-50 text-green-600 border-green-200';
-                      if (bill.paymentStatus === 'Partially Paid') statusClass = 'bg-blue-50 text-blue-600 border-blue-200';
-                      if (bill.paymentStatus === 'Cancelled') statusClass = 'bg-red-50 text-red-600 border-red-200';
-
-                      return (
-                        <div key={index} className="bg-white border rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-                          <div className="flex justify-between items-center border-b pb-3">
-                            <div>
-                              <span className="text-[10px] text-gray-400 font-bold block">BILL NUMBER / INVOICE</span>
-                              <span className="font-bold text-gray-800 text-xs">{bill.billNumber}</span>
-                            </div>
-                            <span className={`text-[10px] font-bold border px-2 py-0.5 rounded-full ${statusClass}`}>
-                              {bill.paymentStatus}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-xs text-gray-600 border-b pb-3">
-                            <div>
-                              <span className="font-semibold text-gray-400 block text-[9px] uppercase">Appointment ID</span>
-                              <span className="font-bold text-gray-800">{bill.appointmentId}</span>
-                            </div>
-                            <div>
-                              <span className="font-semibold text-gray-400 block text-[9px] uppercase">Doctor Name</span>
-                              <span className="font-bold text-gray-800">Dr. {bill.doctorName}</span>
-                            </div>
-                            <div>
-                              <span className="font-semibold text-gray-400 block text-[9px] uppercase">Consultation Fee</span>
-                              <span className="font-bold text-gray-800">₹{bill.consultationFee}</span>
-                            </div>
-                            <div>
-                              <span className="font-semibold text-gray-400 block text-[9px] uppercase">Room Charges</span>
-                              <span className="font-bold text-gray-800">₹{bill.roomCharges || 0}</span>
-                            </div>
-                          </div>
-
-                          <div className="bg-gray-50 border p-3 rounded-xl grid grid-cols-3 gap-2 text-center text-xs">
-                            <div>
-                              <span className="text-[9px] font-bold text-gray-400 block">TOTAL AMOUNT</span>
-                              <span className="font-bold text-gray-800">₹{bill.totalAmount}</span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] font-bold text-gray-400 block">PAID</span>
-                              <span className="font-bold text-green-600">₹{bill.paidAmount}</span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] font-bold text-gray-400 block">PENDING</span>
-                              <span className="font-bold text-red-600">₹{pendingAmt}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2 mt-1">
-                            <button
-                              onClick={() => {
-                                setSelectedBill(bill)
-                                setShowBillModal(true)
-                              }}
-                              className="flex-1 py-2 border rounded-xl hover:bg-gray-50 text-gray-600 font-semibold text-xs transition font-bold"
-                            >
-                              View Bill
-                            </button>
-                            <button
-                              onClick={() => handlePrintBill(bill)}
-                              className="flex-1 py-2 border border-blue-150 hover:bg-blue-50 text-blue-600 font-semibold text-xs transition flex items-center justify-center gap-1.5 font-bold"
-                            >
-                              <LuPrinter size={13} /> Download Invoice
-                            </button>
-                            {pendingAmt > 0 && (
-                              <button
-                                onClick={() => {
-                                  setPayment(bill.appointmentId)
-                                  appointmentRazorpay(bill.appointmentId)
-                                }}
-                                className="flex-1 py-2 bg-primary text-white font-bold rounded-xl text-xs hover:bg-primary-dark transition"
-                              >
-                                Pay Now
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Payment History Log */}
-            <div className="mt-4">
-              <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-1.5">
-                <LuHistory className="text-primary" size={16} />
-                Transaction & Payment Logs
-              </h3>
-
-              <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 border-b text-gray-500 font-semibold">
-                      <th className="p-3">Payment Date</th>
-                      <th className="p-3">Attending Doctor</th>
-                      <th className="p-3">Bill Number</th>
-                      <th className="p-3">Amount Paid</th>
-                      <th className="p-3">Payment Method</th>
-                      <th className="p-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paymentHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan="6" className="p-6 text-center text-gray-400 italic">No payments successfully logged.</td>
-                      </tr>
-                    ) : (
-                      paymentHistory.map((item, index) => (
-                        <tr key={index} className="border-b hover:bg-gray-50/50">
-                          <td className="p-3 text-gray-600">{new Date(item.paymentDate).toLocaleDateString()}</td>
-                          <td className="p-3">
-                            <span className="font-semibold text-gray-800 block">Dr. {item.doctorName}</span>
-                            <span className="text-[10px] text-gray-400">{item.appointmentDate}</span>
-                          </td>
-                          <td className="p-3 font-semibold text-primary">{item.billNumber}</td>
-                          <td className="p-3 font-bold text-green-600">₹{item.amountPaid}</td>
-                          <td className="p-3 capitalize">{item.paymentMethod}</td>
-                          <td className="p-3">
-                            <span className="text-[9px] bg-green-50 text-green-600 font-bold border border-green-150 px-2 py-0.5 rounded-full">Success</span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* TAB 9: COMBINED PROFILE & SETTINGS */}
         {activeTab === 'profile' && (

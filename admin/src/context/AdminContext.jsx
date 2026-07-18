@@ -380,6 +380,22 @@ const AdminContextProvider = (props) => {
 
     }
 
+    const getEligiblePatients = async () => {
+        try {
+            const { data } = await axios.get(backendUrl + '/api/admin/eligible-patients', { headers: { aToken } })
+            if (data.success) {
+                return data.appointments;
+            } else {
+                toast.error(data.message)
+                return [];
+            }
+        } catch (error) {
+            console.log(error)
+            toast.error(error.message)
+            return [];
+        }
+    }
+
     const value = {
         aToken, setAToken,
         doctors,
@@ -406,7 +422,8 @@ const AdminContextProvider = (props) => {
         getBillsAdmin,
         markBillPaid,
         triggerGenerateBillAdmin,
-        updateCharges
+        updateCharges,
+        getEligiblePatients
     }
 
     return (
